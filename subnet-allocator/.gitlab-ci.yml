@@ -1,0 +1,51 @@
+variables:
+  CI_DEBUG_TRACE: "true"
+
+stages:
+  - validate
+  - allocate
+  - notify
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $CIDR_NEEDED && $ALLOCATION_TYPE
+
+validate_input:
+  stage: validate
+  image: python:3.9
+  script:
+    - pip install -r requirements.txt
+    - python scripts/validate_input.py --cidr $CIDR_NEEDED --type $ALLOCATION_TYPE
+  artifacts:
+    paths:
+      - input_params.json
+
+allocate_cidrs:
+  stage: allocate
+  image: python:3.9
+  needs: ["validate_input"]
+  script:
+    - |
+      if [ "$ALLOCATION_TYPE" = "kubernetes" ]; then
+        python scripts/allocate_cidr.py --cidr $CIDR_NEEDED --type kubernetes \
+          --pod-prefix 22 --service-prefix 26 --cluster-prefix 25
+      else
+        python scripts/allocate_cidr.py --cidr $CIDR_NEEDED --type normal
+      fi
+  artifacts:
+    paths:
+      - allocation_results.json
+
+generate_output:
+  stage: notify
+  image: python:3.9
+  needs: ["allocate_cidrs"]
+  script:
+    - python scripts/generate_output.py
+  artifacts:
+    paths:
+      - cidr_allocation_report.txt
+    expire_in: 1 week
+
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
